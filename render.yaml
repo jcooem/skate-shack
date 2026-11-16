@@ -1,0 +1,56 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# In Render: New + → Blueprint → pick this repo. You'll be asked for every
+# value marked `sync: false`. See README.md for where to get each one.
+services:
+  - type: web
+    name: skate-shack
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    # Free instances have no pre-deploy step, so migrations (and the one-time
+    # starter-data seed) run just before the server starts.
+    startCommand: npx prisma migrate deploy && npx prisma db seed && npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Neon → Connection string with "Connection pooling" ON
+      - key: DATABASE_URL
+        sync: false
+      # Neon → Connection string with "Connection pooling" OFF (used for migrations)
+      - key: DIRECT_URL
+        sync: false
+      - key: BETTER_AUTH_SECRET
+        generateValue: true
+      # Comma-separated emails that get the owner/admin role once verified.
+      - key: OWNER_EMAILS
+        sync: false
+      # Only needed with a custom domain, e.g. https://www.yourshop.com
+      # (otherwise Render's RENDER_EXTERNAL_URL is used automatically).
+      - key: BETTER_AUTH_URL
+        sync: false
+      # Email (Resend). Without these, sign-up / password emails can't be delivered.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      # Social sign-in — leave any pair blank to hide that button.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: FACEBOOK_CLIENT_ID
+        sync: false
+      - key: FACEBOOK_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
+      # Display settings
+      - key: NEXT_PUBLIC_CURRENCY
+        value: CAD
+      - key: NEXT_PUBLIC_LOCALE
+        value: en-CA
+      - key: APP_TIMEZONE
+        value: America/Toronto

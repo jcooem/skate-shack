@@ -1,0 +1,245 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────
+// Auth (Better Auth core tables)
+// ─────────────────────────────────────────────────────────────
+
+enum Role {
+  OWNER
+  CUSTOMER
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  role          Role      @default(CUSTOMER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+  customer      Customer?
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Business
+// ─────────────────────────────────────────────────────────────
+
+/// A customer of the shop. Exists independently of a login so the owner can
+/// create customers before they ever sign in. Linked to a User by verified email.
+model Customer {
+  id               String              @id @default(cuid())
+  userId           String?             @unique
+  user             User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  firstName        String
+  lastName         String              @default("")
+  /// Always stored lowercase.
+  email            String?             @unique
+  phone            String              @default("")
+  preferredHollow  String              @default("")
+  preferredProfile String              @default("")
+  sharpenNotes     String              @default("")
+  /// Private notes, only visible to the owner.
+  ownerNotes       String              @default("")
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  skates           Skate[]
+  sharpenings      Sharpening[]
+  transactions     CreditTransaction[]
+
+  @@index([lastName, firstName])
+  @@map("customer")
+}
+
+enum SkateType {
+  HOCKEY_PLAYER
+  HOCKEY_GOALIE
+  FIGURE
+  SPEED
+  RECREATIONAL
+  OTHER
+}
+
+model Skate {
+  id              String       @id @default(cuid())
+  customerId      String
+  customer        Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  label           String       @default("")
+  skateType       SkateType    @default(HOCKEY_PLAYER)
+  brand           String       @default("")
+  model           String       @default("")
+  size            String       @default("")
+  holderBlade     String       @default("")
+  preferredHollow String       @default("")
+  notes           String       @default("")
+  active          Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  sharpenings     Sharpening[]
+
+  @@index([customerId])
+  @@map("skate")
+}
+
+enum ProductKind {
+  SERVICE
+  CARD
+}
+
+/// The owner-editable price list.
+/// SERVICE: `credits` = credits consumed when paid with a card.
+/// CARD:    `credits` = credits granted when purchased.
+model Product {
+  id               String              @id @default(cuid())
+  kind             ProductKind
+  name             String
+  description      String              @default("")
+  priceCents       Int
+  credits          Int                 @default(1)
+  active           Boolean             @default(true)
+  showOnPublicPage Boolean             @default(true)
+  sortOrder        Int                 @default(0)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  sharpenings      Sharpening[]
+  transactions     CreditTransaction[]
+
+  @@map("product")
+}
+
+enum PaymentMethod {
+  CREDIT
+  CASH
+  CARD
+  ETRANSFER
+  COMP
+}
+
+model Sharpening {
+  id                String             @id @default(cuid())
+  customerId        String
+  customer          Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  skateId           String?
+  skate             Skate?             @relation(fields: [skateId], references: [id], onDelete: SetNull)
+  productId         String?
+  product           Product?           @relation(fields: [productId], references: [id], onDelete: SetNull)
+  /// Snapshot of the service name at the time (survives product rename/delete).
+  serviceName       String
+  date              DateTime           @db.Date
+  hollow            String             @default("")
+  profile           String             @default("")
+  paymentMethod     PaymentMethod
+  /// Snapshot of the price at the time, so later price changes don't rewrite history.
+  priceChargedCents Int                @default(0)
+  creditsUsed       Int                @default(0)
+  notes             String             @default("")
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  transaction       CreditTransaction?
+
+  @@index([customerId, date])
+  @@index([date])
+  @@map("sharpening")
+}
+
+enum CreditReason {
+  CARD_PURCHASE
+  SHARPEN
+  ADJUSTMENT
+  REFUND
+}
+
+/// Credit ledger. A customer's balance is SUM(delta).
+model CreditTransaction {
+  id              String       @id @default(cuid())
+  customerId      String
+  customer        Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  delta           Int
+  reason          CreditReason
+  productId       String?
+  product         Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
+  sharpeningId    String?      @unique
+  sharpening      Sharpening?  @relation(fields: [sharpeningId], references: [id], onDelete: Cascade)
+  amountPaidCents Int?
+  note            String       @default("")
+  createdAt       DateTime     @default(now())
+
+  @@index([customerId, createdAt])
+  @@map("credit_transaction")
+}
+
+/// Single-row table (id = 1) holding branding and contact details.
+model Settings {
+  id            Int       @id @default(1)
+  businessName  String    @default("Skate Shack")
+  tagline       String    @default("Sharp edges. Better skating.")
+  aboutText     String    @default("")
+  phone         String    @default("")
+  contactEmail  String    @default("")
+  address       String    @default("")
+  hours         String    @default("")
+  logo          Bytes?
+  logoMime      String?
+  logoUpdatedAt DateTime?
+  updatedAt     DateTime  @updatedAt
+
+  @@map("settings")
+}
