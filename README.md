@@ -12,13 +12,22 @@ Built with Next.js 16, Prisma 7, Better Auth, Tailwind CSS 4 and PostgreSQL.
 
 ## How accounts work
 
-| Situation | What happens |
-|---|---|
-| You add a customer with their email, and they later sign in | The first time, they choose **First time here?**, get an emailed link, and set a password. They can also click **Continue with Google** (or another provider) if it uses the same email. Either way they see everything you logged for them. |
-| A new customer signs up themselves | They confirm their email, and a customer record is created automatically. |
-| You (the owner) | Sign up with an address listed in `OWNER_EMAILS`. Once it's confirmed you get the **Admin** menu. |
+Customers can't create their own logins; you create every customer. There are two ways to let a customer see their card, and you can use either or both. Both are on the customer's **Card link & login** tab, and both are also checkboxes on **Add customer**.
 
-A customer record is linked to a login only after the person proves they own that email, through an emailed link or a provider that verifies emails. Nobody can see someone else's history just by typing their email address.
+| Option | What the customer gets |
+|---|---|
+| **Private card link** (no login) | An email with a secret link (`/card/…`) showing their first name, card balance, sharpening history and card activity. It never shows their email, phone, last name or your private notes. |
+| **Login invite** | An email with a temporary password. On first sign-in they must choose their own password. The temporary password stops working after 7 days. Once they have a login, Google sign-in with the same email also works. |
+
+**How secure the card link is:**
+- Each link holds a 256-bit random secret, and only a hash of it is stored. A database leak doesn't reveal working links.
+- The page tells browsers and search engines not to cache, index or pass the link on (`Referrer-Policy: no-referrer`, `no-store`, `noindex`).
+- Making a new link turns off the old one, and **Turn off link** disables it immediately.
+- Anyone who has the link can see that card, so customers should keep it private. Links don't expire on their own.
+
+**You (the owner):** the first time, the sign-in page shows **Set up owner account**. Use an address listed in `OWNER_EMAILS` and confirm it from the email. After that the tab disappears, and the sign-up API refuses any address not in `OWNER_EMAILS`.
+
+**Forgot password:** on the sign-in page, this sends a reset link to anyone who already has a login.
 
 ---
 
@@ -58,7 +67,7 @@ git remote add origin https://github.com/<you>/skate-shack.git && git push -u or
 1. <https://dashboard.render.com> → **New + → Blueprint** → choose the repo. Render reads `render.yaml`.
 2. Fill in the values it asks for: `DATABASE_URL`, `DIRECT_URL`, `OWNER_EMAILS` (your email), `RESEND_API_KEY` and `EMAIL_FROM`. Leave the social-login values and `BETTER_AUTH_URL` blank for now.
 3. Click **Apply**. The first deploy installs, builds, creates the tables and adds starter prices.
-4. Open `https://<your-service>.onrender.com`, click **Sign in → Create account** with your `OWNER_EMAILS` address, and confirm the email. You're now the owner. Head to **Admin → Branding & settings** to upload your logo and set your name, then **Pricing** to set your prices.
+4. Open `https://<your-service>.onrender.com`, click **Sign in → Set up owner account** with your `OWNER_EMAILS` address, and confirm the email. You're now the owner. Head to **Admin → Branding & settings** to upload your logo and set your name, then **Pricing** to set your prices.
 
 ### 5. Social sign-in (optional; each one is independent)
 Use your live URL in the redirect URIs. With a custom domain, use that domain instead and set `BETTER_AUTH_URL` to it.
@@ -107,7 +116,9 @@ src/lib/credits.ts            sharpening-card ledger rules
 src/lib/customer-link.ts      links a verified login to the owner-created customer record
 src/app/page.tsx              public home page
 src/app/login, src/app/auth   sign-in, set password, confirm email
-src/app/account/*             customer area
+src/app/account/*             customer area (login)
+src/app/card/[token]          private no-login card page
+src/lib/customer-access.ts    card links + temporary-password login invites
 src/app/admin/*               owner admin
 render.yaml                   Render Blueprint
 ```

@@ -5,6 +5,7 @@ import { getBalance } from "@/lib/credits";
 import { getSettings } from "@/lib/settings";
 import { formatDate, formatMoney, plural, skateName } from "@/lib/format";
 import { Card, EmptyState, LinkButton, Notice } from "@/components/ui";
+import { CardBalance } from "@/components/customer-history";
 
 export default async function AccountOverview() {
   const { customer } = await requireCustomer();
@@ -25,17 +26,13 @@ export default async function AccountOverview() {
   return (
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="relative overflow-hidden rounded-2xl bg-rink-900 p-6 text-white shadow-md">
-          <div aria-hidden className="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-ice-500/20" />
-          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-ice-200">{settings.businessName} card</div>
-          <div className="mt-4 font-display text-6xl font-bold">{balance}</div>
-          <div className="text-sm text-ice-100">{balance === 1 ? "sharpen left" : "sharpens left"}</div>
+        <CardBalance businessName={settings.businessName} balance={balance}>
           {balance === 0 && cards[0] && (
             <p className="mt-4 text-sm text-ice-100">
               Pick up a {cards[0].name} for {formatMoney(cards[0].priceCents)} on your next visit.
             </p>
           )}
-        </div>
+        </CardBalance>
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Last sharpen</div>
           {recent[0] ? (

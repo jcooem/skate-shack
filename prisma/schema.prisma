@@ -17,17 +17,20 @@ enum Role {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  name          String
-  email         String    @unique
-  emailVerified Boolean   @default(false)
-  image         String?
-  role          Role      @default(CUSTOMER)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  sessions      Session[]
-  accounts      Account[]
-  customer      Customer?
+  id                    String    @id @default(cuid())
+  name                  String
+  email                 String    @unique
+  emailVerified         Boolean   @default(false)
+  image                 String?
+  role                  Role      @default(CUSTOMER)
+  /// Set when the owner emails a temporary password; cleared once the user picks their own.
+  mustChangePassword    Boolean   @default(false)
+  tempPasswordExpiresAt DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  sessions              Session[]
+  accounts              Account[]
+  customer              Customer?
 
   @@map("user")
 }
@@ -86,24 +89,27 @@ model Verification {
 /// A customer of the shop. Exists independently of a login so the owner can
 /// create customers before they ever sign in. Linked to a User by verified email.
 model Customer {
-  id               String              @id @default(cuid())
-  userId           String?             @unique
-  user             User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
-  firstName        String
-  lastName         String              @default("")
+  id                  String              @id @default(cuid())
+  userId              String?             @unique
+  user                User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  firstName           String
+  lastName            String              @default("")
   /// Always stored lowercase.
-  email            String?             @unique
-  phone            String              @default("")
-  preferredHollow  String              @default("")
-  preferredProfile String              @default("")
-  sharpenNotes     String              @default("")
+  email               String?             @unique
+  phone               String              @default("")
+  preferredHollow     String              @default("")
+  preferredProfile    String              @default("")
+  sharpenNotes        String              @default("")
   /// Private notes, only visible to the owner.
-  ownerNotes       String              @default("")
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
-  skates           Skate[]
-  sharpenings      Sharpening[]
-  transactions     CreditTransaction[]
+  ownerNotes          String              @default("")
+  /// SHA-256 of the private "view my card" link token. The token itself is never stored.
+  shareTokenHash      String?             @unique
+  shareTokenCreatedAt DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  skates              Skate[]
+  sharpenings         Sharpening[]
+  transactions        CreditTransaction[]
 
   @@index([lastName, firstName])
   @@map("customer")

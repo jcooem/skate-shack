@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, startTransition, useActionState, useContext, useEffect, useRef, type ReactNode } from "react";
+import { createContext, startTransition, useActionState, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ActionState } from "@/lib/validation";
 import { buttonClass, cx, Notice } from "@/components/ui";
 
@@ -61,6 +61,7 @@ export function ActionForm({
             <Notice tone="green">{state.success}</Notice>
           </div>
         )}
+        {state?.link && <CopyLink url={state.link} />}
       </PendingContext.Provider>
     </form>
   );
@@ -84,5 +85,36 @@ export function SubmitButton({
     <button type="submit" disabled={pending} className={cx(buttonClass(variant, size), className)}>
       {pending ? (pendingText ?? "Saving…") : children}
     </button>
+  );
+}
+
+/** A read-only link with a Copy button (for one-time links). */
+export function CopyLink({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="mt-2 flex gap-2">
+      <input
+        readOnly
+        value={url}
+        aria-label="New link"
+        onFocus={(e) => e.currentTarget.select()}
+        className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700"
+      />
+      <button
+        type="button"
+        className={buttonClass("secondary", "sm")}
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(url);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          } catch {
+            // Clipboard blocked: the field can still be selected and copied by hand.
+          }
+        }}
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </div>
   );
 }

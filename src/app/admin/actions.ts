@@ -7,6 +7,7 @@ import { requireOwner } from "@/lib/authz";
 import { runAction } from "@/lib/actions";
 import * as credits from "@/lib/credits";
 import { UserError } from "@/lib/credits";
+import * as access from "@/lib/customer-access";
 import {
   adjustCreditsSchema,
   customerAdminSchema,
@@ -31,14 +32,37 @@ async function assertCustomer(customerId: string) {
 
 export async function createCustomer(_: ActionState, formData: FormData): Promise<ActionState> {
   await requireOwner();
+  const sendCardLink = formData.get("sendCardLink") === "on";
+  const sendInvite = formData.get("sendLoginInvite") === "on";
   let id = "";
+  const sent: string[] = [];
+  let sendFailed = false;
   const result = await runAction(async () => {
     const data = customerAdminSchema.parse(formToObject(formData));
+    if ((sendCardLink || sendInvite) && !data.email) throw new UserError("Add their email address to send them a card link or login.");
     const customer = await prisma.customer.create({ data });
     id = customer.id;
   });
   if (result?.error) return result;
-  redirect(`/admin/customers/${id}?tab=profile&created=1`);
+
+  // The customer is saved either way; an email problem is reported on their page.
+  try {
+    if (sendCardLink) {
+      await access.issueCardLink(id, { email: true });
+      sent.push("card");
+    }
+    if (sendInvite) {
+      await access.sendLoginInvite(id);
+      sent.push("login");
+    }
+  } catch (err) {
+    console.error("Sending welcome emails failed", err);
+    sendFailed = true;
+  }
+  const params = new URLSearchParams({ tab: "profile", created: "1" });
+  if (sent.length) params.set("sent", sent.join(","));
+  if (sendFailed) params.set("sendFailed", "1");
+  redirect(`/admin/customers/${id}?${params}`);
 }
 
 export async function updateCustomer(customerId: string, _: ActionState, formData: FormData) {
@@ -64,6 +88,41 @@ export async function deleteCustomer(customerId: string, _: ActionState, _formDa
   if (result?.error) return result;
   revalidatePath("/admin", "layout");
   redirect("/admin/customers?deleted=1");
+}
+
+// ── Card link & login ────────────────────────────────────────
+
+export async function emailCardLink(customerId: string, _: ActionState, _formData: FormData) {
+  await requireOwner();
+  return runAction(async () => {
+    const { url, sentTo } = await access.issueCardLink(customerId, { email: true });
+    return { success: `Emailed a new card link to ${sentTo}. Any older link no longer works.`, link: url };
+  });
+}
+
+export async function createCardLink(customerId: string, _: ActionState, _formData: FormData) {
+  await requireOwner();
+  return runAction(async () => {
+    const { url } = await access.issueCardLink(customerId, { email: false });
+    return { success: "New card link created. Copy it now — it can't be shown again. Any older link no longer works.", link: url };
+  });
+}
+
+export async function disableCardLink(customerId: string, _: ActionState, _formData: FormData) {
+  await requireOwner();
+  return runAction(async () => {
+    await assertCustomer(customerId);
+    await access.disableCardLink(customerId);
+    return { success: "Card link turned off. It no longer works." };
+  });
+}
+
+export async function emailLoginInvite(customerId: string, _: ActionState, _formData: FormData) {
+  await requireOwner();
+  return runAction(async () => {
+    const { sentTo } = await access.sendLoginInvite(customerId);
+    return { success: `Emailed a temporary password to ${sentTo}. It works for 7 days.` };
+  });
 }
 
 // ── Skates ───────────────────────────────────────────────────

@@ -9,10 +9,14 @@ import { CREDIT_REASONS, PAYMENT_METHODS_SHORT, SKATE_TYPES } from "@/lib/consta
 import { formatDate, formatDateTime, formatMoney, fullName, skateName, todayInput } from "@/lib/format";
 import {
   adjustCredits,
+  createCardLink,
   deleteCreditTransaction,
   deleteCustomer,
   deleteSharpening,
   deleteSkate,
+  disableCardLink,
+  emailCardLink,
+  emailLoginInvite,
   saveSharpening,
   saveSkate,
   sellCard,
@@ -23,7 +27,7 @@ import { CustomerFields, SharpenDatalists, SkateFields } from "@/components/form
 import { SharpenForm } from "@/components/sharpen-form";
 import { Badge, Card, cx, EmptyState, Field, inputClass, LinkButton, Notice, Table, Td, Th } from "@/components/ui";
 
-type Tab = "sharpens" | "credits" | "profile";
+type Tab = "sharpens" | "credits" | "profile" | "access";
 
 export async function generateMetadata({ params }: PageProps<"/admin/customers/[id]">): Promise<Metadata> {
   const { id } = await params;
@@ -35,12 +39,14 @@ export default async function CustomerPage({ params, searchParams }: PageProps<"
   await requireOwner();
   const { id } = await params;
   const sp = await searchParams;
-  const tab: Tab = sp.tab === "credits" || sp.tab === "profile" ? sp.tab : "sharpens";
+  const tab: Tab = sp.tab === "credits" || sp.tab === "profile" || sp.tab === "access" ? sp.tab : "sharpens";
 
   const customer = await prisma.customer.findUnique({
     where: { id },
     include: {
-      user: { select: { email: true, accounts: { select: { providerId: true } } } },
+      user: {
+        select: { email: true, role: true, mustChangePassword: true, tempPasswordExpiresAt: true, accounts: { select: { providerId: true } } },
+      },
       skates: { orderBy: [{ active: "desc" }, { createdAt: "asc" }] },
     },
   });
@@ -52,6 +58,7 @@ export default async function CustomerPage({ params, searchParams }: PageProps<"
     ["sharpens", "Sharpens"],
     ["credits", `Credits (${balance})`],
     ["profile", "Profile & skates"],
+    ["access", "Card link & login"],
   ];
 
   return (
@@ -70,7 +77,10 @@ export default async function CustomerPage({ params, searchParams }: PageProps<"
               {customer.preferredProfile && <span>Profile: {customer.preferredProfile}</span>}
             </p>
             <div className="mt-2 flex flex-wrap gap-1">
-              {customer.user ? (
+              {customer.shareTokenHash && <Badge tone="green">Card link on</Badge>}
+              {customer.user?.mustChangePassword ? (
+                <Badge tone="amber">Login invite sent</Badge>
+              ) : customer.user ? (
                 <Badge tone="blue">
                   Signs in with {customer.user.accounts.map((a) => (a.providerId === "credential" ? "password" : a.providerId)).join(", ") || "email link"}
                 </Badge>
@@ -120,7 +130,23 @@ export default async function CustomerPage({ params, searchParams }: PageProps<"
       <SharpenDatalists />
       {sp.created && (
         <div className="mb-4">
-          <Notice tone="green">Customer added. Add their skates below, or log a sharpen from the Sharpens tab.</Notice>
+          <Notice tone="green">
+            Customer added.
+            {typeof sp.sent === "string" && sp.sent.includes("card") && " We emailed them their card link."}
+            {typeof sp.sent === "string" && sp.sent.includes("login") && " We emailed them a login with a temporary password."}{" "}
+            Add their skates below, or log a sharpen from the Sharpens tab.
+          </Notice>
+        </div>
+      )}
+      {sp.sendFailed && (
+        <div className="mb-4">
+          <Notice tone="red">
+            We couldn&apos;t send every email to this customer. Try again from the{" "}
+            <Link href={`/admin/customers/${id}?tab=access`} className="font-semibold underline">
+              Card link &amp; login
+            </Link>{" "}
+            tab.
+          </Notice>
         </div>
       )}
       {sp.saved && (
@@ -132,6 +158,7 @@ export default async function CustomerPage({ params, searchParams }: PageProps<"
       {tab === "sharpens" && <SharpensTab customer={customer} balance={balance} />}
       {tab === "credits" && <CreditsTab customerId={id} balance={balance} />}
       {tab === "profile" && <ProfileTab customer={customer} />}
+      {tab === "access" && <AccessTab customer={customer} />}
     </>
   );
 }
@@ -417,6 +444,96 @@ function ProfileTab({ customer }: { customer: CustomerWithSkates & { user: { ema
             Delete customer
           </SubmitButton>
         </ActionForm>
+      </Card>
+    </div>
+  );
+}
+
+// ── Card link & login ────────────────────────────────────────
+
+type CustomerWithLogin = Prisma.CustomerGetPayload<{
+  include: {
+    user: { select: { email: true; role: true; mustChangePassword: true; tempPasswordExpiresAt: true; accounts: { select: { providerId: true } } } };
+  };
+}>;
+
+const REPLACE_LINK_WARNING = "This makes a new link and the old one will stop working. Continue?";
+
+function AccessTab({ customer }: { customer: CustomerWithLogin }) {
+  const id = customer.id;
+  const hasLink = Boolean(customer.shareTokenHash);
+  const user = customer.user;
+  const isOwner = user?.role === "OWNER";
+  const inviteExpired = Boolean(user?.mustChangePassword && user.tempPasswordExpiresAt && user.tempPasswordExpiresAt < new Date());
+  const loginStatus = !user
+    ? "No login yet."
+    : user.mustChangePassword
+      ? inviteExpired
+        ? "Login invite sent, but the temporary password has expired. Send a new one."
+        : `Login invite sent to ${user.email}. Waiting for their first sign-in.`
+      : `Signs in as ${user.email} with ${user.accounts.map((a) => (a.providerId === "credential" ? "a password" : a.providerId)).join(", ") || "an email link"}.`;
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <Card title="Private card link">
+        <p className="text-sm text-slate-600">
+          A secret link that shows this customer&apos;s card balance and sharpening history, with no login needed. Only their first
+          name is shown, never their email, phone or your private notes.
+        </p>
+        <p className="mt-3 text-sm font-medium text-slate-800">
+          {hasLink && customer.shareTokenCreatedAt ? `Link active since ${formatDateTime(customer.shareTokenCreatedAt)}` : "No active link."}
+        </p>
+        <div className="mt-4 space-y-3">
+          {customer.email ? (
+            <ActionForm action={emailCardLink.bind(null, id)} confirm={hasLink ? REPLACE_LINK_WARNING : undefined}>
+              <SubmitButton pendingText="Sending…">Email card link to {customer.email}</SubmitButton>
+            </ActionForm>
+          ) : (
+            <p className="text-sm text-slate-500">Add an email on the Profile tab to email the link.</p>
+          )}
+          <ActionForm action={createCardLink.bind(null, id)} confirm={hasLink ? REPLACE_LINK_WARNING : undefined}>
+            <SubmitButton variant="secondary" pendingText="Creating…">
+              Create link to copy (e.g. to text it)
+            </SubmitButton>
+          </ActionForm>
+          {/* Stays mounted after the link is turned off, so its confirmation message stays visible. */}
+          <ActionForm action={disableCardLink.bind(null, id)} confirm="Turn off this customer's card link? It will stop working right away.">
+            {hasLink && (
+              <SubmitButton variant="ghost" pendingText="Turning off…">
+                Turn off link
+              </SubmitButton>
+            )}
+          </ActionForm>
+        </div>
+        <p className="mt-4 text-xs text-slate-500">
+          For security, a link is only shown once, when it&apos;s made. To send it again, make a new one; the old link stops working.
+        </p>
+      </Card>
+
+      <Card title="Login">
+        <p className="text-sm text-slate-600">
+          Customers can&apos;t create their own logins. Send one here: they get a temporary password by email and choose their own
+          the first time they sign in.
+        </p>
+        <p className="mt-3 text-sm font-medium text-slate-800">{loginStatus}</p>
+        <div className="mt-4">
+          {isOwner ? (
+            <p className="text-sm text-slate-500">This is an owner login, so it can&apos;t be reset from here.</p>
+          ) : !customer.email && !user ? (
+            <p className="text-sm text-slate-500">Add an email on the Profile tab to send a login.</p>
+          ) : (
+            <ActionForm
+              action={emailLoginInvite.bind(null, id)}
+              confirm={
+                user && !user.mustChangePassword
+                  ? "This replaces their current password with a temporary one and signs them out. Continue?"
+                  : undefined
+              }
+            >
+              <SubmitButton pendingText="Sending…">{user ? "Email a new temporary password" : "Email login invite"}</SubmitButton>
+            </ActionForm>
+          )}
+        </div>
       </Card>
     </div>
   );

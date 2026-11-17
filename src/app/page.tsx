@@ -29,6 +29,13 @@ export default async function HomePage() {
         />
         <div className="relative mx-auto grid max-w-6xl gap-10 px-4 py-16 md:grid-cols-[1.4fr_1fr] md:py-24">
           <div>
+            {settings.logoUrl && (
+              // Logo also shown on phones (the large one on the right is desktop-only).
+              <div className="mb-6 inline-block rounded-2xl bg-white p-3 shadow-lg md:hidden">
+                {/* eslint-disable-next-line @next/next/no-img-element -- served from our own /api/logo route */}
+                <img src={settings.logoUrl} alt={settings.businessName} className="h-20 w-auto max-w-[14rem] object-contain" />
+              </div>
+            )}
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-ice-400">Skate sharpening</p>
             <h1 className="mt-3 font-display text-5xl font-bold uppercase leading-[0.95] tracking-wide md:text-7xl">
               {settings.businessName}
@@ -44,9 +51,17 @@ export default async function HomePage() {
             </div>
           </div>
           <div className="hidden items-center justify-center md:flex">
-            <div className="grid h-56 w-56 place-items-center rounded-full border border-white/15 bg-white/5 text-ice-200">
-              <BladeIcon className="h-32 w-32" />
-            </div>
+            {settings.logoUrl ? (
+              // White panel so logos with dark artwork stay readable on the dark hero.
+              <div className="grid max-w-full place-items-center rounded-3xl bg-white p-8 shadow-2xl">
+                {/* eslint-disable-next-line @next/next/no-img-element -- served from our own /api/logo route */}
+                <img src={settings.logoUrl} alt={settings.businessName} className="max-h-56 w-auto max-w-full object-contain" />
+              </div>
+            ) : (
+              <div className="grid h-56 w-56 place-items-center rounded-full border border-white/15 bg-white/5 text-ice-200">
+                <BladeIcon className="h-32 w-32" />
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -75,7 +90,7 @@ export default async function HomePage() {
           <>
             <h3 className="mt-14 font-display text-3xl font-bold uppercase tracking-wide text-slate-900">Sharpening cards</h3>
             <p className="mt-2 max-w-2xl text-slate-600">
-              Prepay and save. Your card balance is tracked for you — sign in any time to see how many sharpens you have left.
+              Prepay and save. Your card balance is tracked for you, and we&apos;ll email you a private link to check how many sharpens you have left any time.
             </p>
             <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {cards.map((c) => {
@@ -106,7 +121,7 @@ export default async function HomePage() {
           {[
             ["Drop off", "Bring in your skates. Tell us your hollow and profile, or we'll help you pick one."],
             ["We sharpen", "Every pair is checked for level edges and finished by hand."],
-            ["Track it", "Sign in to see your sharpening history, preferences and card balance."],
+            ["Track it", "We keep your history and preferences on file, and email you a private link to check your card balance."],
           ].map(([title, body], i) => (
             <div key={title}>
               <div className="font-display text-4xl font-bold text-ice-500">0{i + 1}</div>

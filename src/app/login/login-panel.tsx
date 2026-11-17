@@ -8,21 +8,24 @@ import { buttonClass, cx, Field, inputClass, Notice } from "@/components/ui";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { requestSetPasswordLink } from "./actions";
 
-type Tab = "signin" | "signup" | "link";
+type Tab = "signin" | "forgot" | "owner";
 
 export function LoginPanel({
   providers,
   next,
   initialError,
   initialNotice,
+  ownerSetup,
 }: {
   providers: SocialProviderId[];
+  /** True until the first owner account exists. */
+  ownerSetup: boolean;
   next: string;
   initialError?: string;
   initialNotice?: string;
 }) {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>("signin");
+  const [tab, setTab] = useState<Tab>(ownerSetup ? "owner" : "signin");
   const [error, setError] = useState(initialError);
   const [notice, setNotice] = useState(initialNotice);
   const [pending, setPending] = useState(false);
@@ -46,7 +49,7 @@ export function LoginPanel({
     });
     setPending(false);
     if (error) {
-      if (error.status === 403) {
+      if (error.code === "EMAIL_NOT_VERIFIED") {
         setNotice("Please confirm your email first — we've just sent you a new confirmation link.");
       } else {
         setError(error.message || "Incorrect email or password.");
@@ -57,7 +60,7 @@ export function LoginPanel({
     router.refresh();
   }
 
-  async function onSignUp(e: FormEvent<HTMLFormElement>) {
+  async function onOwnerSignUp(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     setPending(true);
@@ -71,10 +74,10 @@ export function LoginPanel({
     });
     setPending(false);
     if (error) {
-      setError(error.message || "We couldn't create your account.");
+      setError(error.message || "We couldn't create the account.");
       return;
     }
-    setNotice(`Almost done! We've emailed a confirmation link to ${email}. Click it to finish creating your account.`);
+    setNotice(`Almost done! We've emailed a confirmation link to ${email}. Click it to finish setting up the owner account.`);
   }
 
   async function social(provider: SocialProviderId) {
@@ -83,9 +86,9 @@ export function LoginPanel({
   }
 
   const tabs: [Tab, string][] = [
+    ...(ownerSetup ? ([["owner", "Set up owner account"]] as [Tab, string][]) : []),
     ["signin", "Sign in"],
-    ["signup", "Create account"],
-    ["link", "First time here?"],
+    ["forgot", "Forgot password?"],
   ];
 
   return (
@@ -108,7 +111,7 @@ export function LoginPanel({
         </>
       )}
 
-      <div role="tablist" className="mb-5 grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1 text-sm">
+      <div role="tablist" className={cx("mb-5 grid gap-1", ownerSetup ? "grid-cols-3" : "grid-cols-2", " rounded-lg bg-slate-100 p-1 text-sm")}>
         {tabs.map(([key, label]) => (
           <button
             key={key}
@@ -149,15 +152,17 @@ export function LoginPanel({
             {pending ? "Signing in…" : "Sign in"}
           </button>
           <p className="text-center text-sm text-slate-500">
-            <button type="button" className="text-ice-700 hover:underline" onClick={() => switchTab("link")}>
-              Forgot your password?
-            </button>
+            No login yet? Ask us at the shop and we&apos;ll email you one.
           </p>
         </form>
       )}
 
-      {tab === "signup" && (
-        <form onSubmit={onSignUp} className="space-y-4">
+      {tab === "owner" && (
+        <form onSubmit={onOwnerSignUp} className="space-y-4">
+          <p className="text-sm text-slate-600">
+            First-time setup: create the owner login using an email listed in <code>OWNER_EMAILS</code>. After that, this tab
+            disappears and customers can&apos;t create their own logins.
+          </p>
           <Field label="Your name">
             <input name="name" required autoComplete="name" className={inputClass} />
           </Field>
@@ -168,19 +173,15 @@ export function LoginPanel({
             <input name="password" type="password" required minLength={8} autoComplete="new-password" className={inputClass} />
           </Field>
           <button type="submit" disabled={pending} className={cx(buttonClass(), "w-full")}>
-            {pending ? "Creating account…" : "Create account"}
+            {pending ? "Creating account…" : "Create owner account"}
           </button>
-          <p className="text-xs text-slate-500">
-            Already a customer? Use “First time here?” instead so your sharpening history comes with you.
-          </p>
         </form>
       )}
 
-      {tab === "link" && (
+      {tab === "forgot" && (
         <ActionForm action={requestSetPasswordLink} className="space-y-4">
           <p className="text-sm text-slate-600">
-            Already a customer, or forgot your password? Enter your email and we&apos;ll send you a link to choose a password.
-            {providers.length > 0 && " You can also just use one of the buttons above if it matches your email."}
+            Enter the email you sign in with and we&apos;ll send you a link to choose a new password.
           </p>
           <Field label="Email">
             <input name="email" type="email" required autoComplete="email" className={inputClass} />

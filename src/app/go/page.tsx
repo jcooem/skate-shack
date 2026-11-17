@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/authz";
 export default async function GoPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  if (user.mustChangePassword) redirect("/auth/change-password");
   if (!user.emailVerified) redirect("/auth/verify-email");
   redirect(user.role === "OWNER" ? "/admin" : "/account");
 }

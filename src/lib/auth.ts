@@ -2,10 +2,12 @@ import "server-only";
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { prisma } from "@/lib/db";
 import { actionEmail, sendEmail } from "@/lib/email";
 import { getSettings } from "@/lib/settings";
 import type { SocialProviderId } from "@/lib/constants";
+import { parseOwnerEmails } from "@/lib/customer-link";
 
 async function businessName() {
   try {
@@ -15,12 +17,15 @@ async function businessName() {
   }
 }
 
+// Customers can't create their own logins: the owner creates them (see
+// emailLoginInvite in src/app/admin/actions.ts). disableImplicitSignUp means a
+// social sign-in only works for someone who already has a login here.
 const socialProviders = {
   ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
-    ? { google: { clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET } }
+    ? { google: { clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET, disableImplicitSignUp: true } }
     : {}),
   ...(process.env.FACEBOOK_CLIENT_ID && process.env.FACEBOOK_CLIENT_SECRET
-    ? { facebook: { clientId: process.env.FACEBOOK_CLIENT_ID, clientSecret: process.env.FACEBOOK_CLIENT_SECRET } }
+    ? { facebook: { clientId: process.env.FACEBOOK_CLIENT_ID, clientSecret: process.env.FACEBOOK_CLIENT_SECRET, disableImplicitSignUp: true } }
     : {}),
   ...(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET
     ? {
@@ -29,6 +34,7 @@ const socialProviders = {
           clientSecret: process.env.MICROSOFT_CLIENT_SECRET,
           // "common" = personal Microsoft accounts (Outlook/Hotmail) + work/school accounts.
           tenantId: process.env.MICROSOFT_TENANT_ID || "common",
+          disableImplicitSignUp: true,
         },
       }
     : {}),
@@ -71,7 +77,11 @@ export const auth = betterAuth({
     },
     onPasswordReset: async ({ user }) => {
       // The reset link was delivered to this inbox, which proves ownership.
-      await prisma.user.update({ where: { id: user.id }, data: { emailVerified: true } });
+      // Choosing their own password also replaces any temporary one.
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { emailVerified: true, mustChangePassword: false, tempPasswordExpiresAt: null },
+      });
     },
   },
 
@@ -111,6 +121,32 @@ export const auth = betterAuth({
   session: {
     expiresIn: 60 * 60 * 24 * 30, // 30 days
     updateAge: 60 * 60 * 24,
+  },
+
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      const email = typeof ctx.body?.email === "string" ? ctx.body.email.trim().toLowerCase() : "";
+
+      // Self sign-up is off. Only addresses in OWNER_EMAILS can create a login
+      // this way (to set up the owner account).
+      if (ctx.path === "/sign-up/email" && !parseOwnerEmails(process.env.OWNER_EMAILS).includes(email)) {
+        throw new APIError("FORBIDDEN", { message: "New accounts are created by the shop. Ask us and we'll email you a login." });
+      }
+
+      // Temporary passwords stop working after a few days.
+      if (ctx.path === "/sign-in/email" && email) {
+        const user = await prisma.user.findUnique({
+          where: { email },
+          select: { mustChangePassword: true, tempPasswordExpiresAt: true },
+        });
+        if (user?.mustChangePassword && user.tempPasswordExpiresAt && user.tempPasswordExpiresAt < new Date()) {
+          throw new APIError("FORBIDDEN", {
+            message: "This temporary password has expired. Ask us to send you a new one.",
+            code: "TEMP_PASSWORD_EXPIRED",
+          });
+        }
+      }
+    }),
   },
 
   // Must be last: lets Better Auth set cookies from Server Actions.

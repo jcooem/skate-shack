@@ -12,6 +12,8 @@ export type CurrentUser = {
   email: string;
   emailVerified: boolean;
   role: "OWNER" | "CUSTOMER";
+  /** Signed in with a temporary password and must choose their own first. */
+  mustChangePassword: boolean;
 };
 
 /** The signed-in user (with role), or null. Cached per request. */
@@ -21,7 +23,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
 
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { id: true, name: true, email: true, emailVerified: true, role: true },
+    select: { id: true, name: true, email: true, emailVerified: true, role: true, mustChangePassword: true },
   });
   if (!user) return null;
 
@@ -37,6 +39,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
 export async function requireOwner() {
   const user = await getCurrentUser();
   if (!user) redirect("/login?next=/admin");
+  if (user.mustChangePassword) redirect("/auth/change-password");
   if (user.role !== "OWNER") redirect("/account");
   return user;
 }
@@ -49,6 +52,7 @@ export async function requireOwner() {
 export const requireCustomer = cache(async () => {
   const user = await getCurrentUser();
   if (!user) redirect("/login?next=/account");
+  if (user.mustChangePassword) redirect("/auth/change-password");
   if (!user.emailVerified) redirect("/auth/verify-email");
   const customer = await ensureCustomerForUser(prisma, user);
   return { user, customer };

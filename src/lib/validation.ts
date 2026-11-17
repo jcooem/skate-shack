@@ -3,7 +3,12 @@ import { PAYMENT_METHODS, SKATE_TYPES } from "@/lib/constants";
 import { parseMoneyToCents } from "@/lib/format";
 
 /** Result type returned by every Server Action used with <ActionForm>. */
-export type ActionState = { error?: string; success?: string } | null;
+export type ActionState = {
+  error?: string;
+  success?: string;
+  /** A newly created private link, shown once with a Copy button. */
+  link?: string;
+} | null;
 
 /** FormData → plain object of strings (checkboxes become "on"; missing ones are absent). */
 export function formToObject(formData: FormData) {

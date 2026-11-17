@@ -23,7 +23,7 @@ export default async function SetPasswordPage({ searchParams }: PageProps<"/auth
               <Link href="/login" className="text-ice-700 hover:underline">
                 sign in
               </Link>{" "}
-              and choose “First time here?” to get a fresh link.
+              and choose “Forgot password?” to get a fresh link.
             </p>
           </div>
         )}
