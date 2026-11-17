@@ -8,6 +8,8 @@ export type ActionState = {
   success?: string;
   /** A newly created private link, shown once with a Copy button. */
   link?: string;
+  /** A one-time secret (e.g. a temporary password), shown once with a Copy button. */
+  secret?: { label: string; value: string };
 } | null;
 
 /** FormData → plain object of strings (checkboxes become "on"; missing ones are absent). */
@@ -56,6 +58,11 @@ const optionalMoney = z
     }
     return cents;
   });
+
+export const ownerSchema = z.object({
+  email: z.string().trim().toLowerCase().pipe(z.email("Enter a valid email address")),
+  name: z.string().trim().max(100).default(""),
+});
 
 const optionalEmail = z
   .string()

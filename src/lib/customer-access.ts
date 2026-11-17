@@ -1,10 +1,12 @@
 import "server-only";
 import { auth } from "@/lib/auth";
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { UserError } from "@/lib/credits";
 import { actionEmail, sendEmail } from "@/lib/email";
 import { fullName } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
+import { parseOwnerEmails } from "@/lib/customer-link";
 import { createShareToken, shareUrl, siteUrl } from "@/lib/share-link";
 import { generateTempPassword, TEMP_PASSWORD_DAYS } from "@/lib/temp-password";
 
@@ -76,27 +78,11 @@ export async function sendLoginInvite(customerId: string) {
   if (user.role === "OWNER") throw new UserError("That email belongs to an owner login, so it can't be reset from here.");
 
   const tempPassword = generateTempPassword();
-  const ctx = await auth.$context;
-  const hash = await ctx.password.hash(tempPassword);
+  const hash = await hashPassword(tempPassword);
   const userId = user.id;
 
   await prisma.$transaction(async (tx) => {
-    const credential = await tx.account.findFirst({ where: { userId, providerId: "credential" } });
-    if (credential) {
-      await tx.account.update({ where: { id: credential.id }, data: { password: hash } });
-    } else {
-      await tx.account.create({ data: { userId, accountId: userId, providerId: "credential", password: hash } });
-    }
-    await tx.user.update({
-      where: { id: userId },
-      data: {
-        emailVerified: true,
-        mustChangePassword: true,
-        tempPasswordExpiresAt: new Date(Date.now() + TEMP_PASSWORD_DAYS * 24 * 60 * 60 * 1000),
-      },
-    });
-    // Sign out any existing sessions: the old password no longer applies.
-    await tx.session.deleteMany({ where: { userId } });
+    await applyTempPassword(tx, userId, hash);
     await tx.customer.update({ where: { id: customerId }, data: { userId } });
   });
 
@@ -115,4 +101,100 @@ export async function sendLoginInvite(customerId: string) {
     }),
   });
   return { sentTo: user.email };
+}
+
+// ── Shared temporary-password helpers ────────────────────────
+
+async function hashPassword(password: string) {
+  const ctx = await auth.$context;
+  return ctx.password.hash(password);
+}
+
+/**
+ * Sets a (hashed) temporary password on a login: creates or updates its
+ * email/password account, forces a password change on next sign-in, sets the
+ * expiry and signs out every existing session.
+ */
+async function applyTempPassword(tx: Prisma.TransactionClient, userId: string, hash: string) {
+  const credential = await tx.account.findFirst({ where: { userId, providerId: "credential" } });
+  if (credential) {
+    await tx.account.update({ where: { id: credential.id }, data: { password: hash } });
+  } else {
+    await tx.account.create({ data: { userId, accountId: userId, providerId: "credential", password: hash } });
+  }
+  await tx.user.update({
+    where: { id: userId },
+    data: {
+      emailVerified: true,
+      mustChangePassword: true,
+      tempPasswordExpiresAt: new Date(Date.now() + TEMP_PASSWORD_DAYS * 24 * 60 * 60 * 1000),
+    },
+  });
+  // Sign out any existing sessions: the old password no longer applies.
+  await tx.session.deleteMany({ where: { userId } });
+}
+
+// ── Owners ───────────────────────────────────────────────────
+// Nothing here sends email: the temporary password is returned so the owner
+// adding them can pass it on in person or by text.
+
+/**
+ * Makes `email` an owner. A new login gets a temporary password (returned).
+ * An existing verified login is just promoted and keeps its password; an
+ * unverified one gets a temporary password too, since nobody has proven they
+ * own that inbox.
+ */
+export async function addOwner(email: string, name: string) {
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing?.role === "OWNER") throw new UserError(`${email} is already an owner.`);
+
+  if (existing?.emailVerified) {
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: existing.id }, data: { role: "OWNER" } }),
+      // Make them sign in again so the new role applies everywhere at once.
+      prisma.session.deleteMany({ where: { userId: existing.id } }),
+    ]);
+    return { tempPassword: null };
+  }
+
+  const tempPassword = generateTempPassword();
+  const hash = await hashPassword(tempPassword);
+  await prisma.$transaction(async (tx) => {
+    const user = existing
+      ? await tx.user.update({ where: { id: existing.id }, data: { role: "OWNER", ...(name ? { name } : {}) } })
+      : await tx.user.create({ data: { email, name: name || email, role: "OWNER", emailVerified: true } });
+    await applyTempPassword(tx, user.id, hash);
+  });
+  return { tempPassword };
+}
+
+async function findOtherOwner(userId: string, currentUserId: string) {
+  if (userId === currentUserId) throw new UserError("You can't do that to your own login.");
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, role: true } });
+  if (!user || user.role !== "OWNER") throw new UserError("That owner no longer exists.");
+  return user;
+}
+
+/** Gives another owner a new temporary password (e.g. they lost the first one). */
+export async function resetOwnerPassword(userId: string, currentUserId: string) {
+  const user = await findOtherOwner(userId, currentUserId);
+  const tempPassword = generateTempPassword();
+  const hash = await hashPassword(tempPassword);
+  await prisma.$transaction((tx) => applyTempPassword(tx, user.id, hash));
+  return { email: user.email, tempPassword };
+}
+
+/** Turns another owner back into an ordinary login and signs them out. */
+export async function removeOwner(userId: string, currentUserId: string) {
+  const user = await findOtherOwner(userId, currentUserId);
+  if (parseOwnerEmails(process.env.OWNER_EMAILS).includes(user.email.toLowerCase())) {
+    throw new UserError(
+      `${user.email} is listed in OWNER_EMAILS, so they'd become an owner again next time they sign in. Remove it from OWNER_EMAILS (Render → Environment) first.`,
+    );
+  }
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: user.id }, data: { role: "CUSTOMER" } }),
+    prisma.session.deleteMany({ where: { userId: user.id } }),
+  ]);
+  return { email: user.email };
 }

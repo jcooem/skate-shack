@@ -27,6 +27,8 @@ Customers can't create their own logins; you create every customer. There are tw
 
 **You (the owner):** the first time, the sign-in page shows **Set up owner account**. Use an address listed in `OWNER_EMAILS` and confirm it from the email. After that the tab disappears, and the sign-up API refuses any address not in `OWNER_EMAILS`.
 
+**More owners:** go to **Admin → Owners → Add an owner**. No email is sent. You get a temporary password on screen to pass on, and they choose their own password at first sign-in. An address that already has a login simply becomes an owner. You don't need to add extra owners to `OWNER_EMAILS`. The same page can give another owner a new temporary password or remove them. Someone listed in `OWNER_EMAILS` can't be removed there, because they'd become an owner again at their next sign-in, so take them out of the variable first.
+
 **Forgot password:** on the sign-in page, this sends a reset link to anyone who already has a login.
 
 ---

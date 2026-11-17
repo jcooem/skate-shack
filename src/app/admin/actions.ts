@@ -12,6 +12,7 @@ import {
   adjustCreditsSchema,
   customerAdminSchema,
   formToObject,
+  ownerSchema,
   productSchema,
   sellCardSchema,
   settingsSchema,
@@ -123,6 +124,47 @@ export async function emailLoginInvite(customerId: string, _: ActionState, _form
     const { sentTo } = await access.sendLoginInvite(customerId);
     return { success: `Emailed a temporary password to ${sentTo}. It works for 7 days.` };
   });
+}
+
+// ── Owners ───────────────────────────────────────────────────
+
+const ownerPasswordNote = "Give it to them in person or by text: it isn't emailed and can't be shown again. They sign in at the usual Sign in page and choose their own password right away. It stops working after 7 days.";
+
+export async function addOwner(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requireOwner();
+  return runAction(async () => {
+    const { email, name } = ownerSchema.parse(formToObject(formData));
+    const { tempPassword } = await access.addOwner(email, name);
+    if (!tempPassword) {
+      return { success: `${email} already had a login and is now an owner. They keep their current password (or Google sign-in).` };
+    }
+    return {
+      success: `${email} is now an owner. Here's their temporary password. ${ownerPasswordNote}`,
+      secret: { label: "Temporary password", value: tempPassword },
+    };
+  });
+}
+
+export async function resetOwnerPassword(userId: string, _: ActionState, _formData: FormData): Promise<ActionState> {
+  const me = await requireOwner();
+  return runAction(async () => {
+    const { email, tempPassword } = await access.resetOwnerPassword(userId, me.id);
+    return {
+      success: `New temporary password for ${email}. Their old password no longer works. ${ownerPasswordNote}`,
+      secret: { label: "Temporary password", value: tempPassword },
+    };
+  });
+}
+
+export async function removeOwner(userId: string, _: ActionState, _formData: FormData): Promise<ActionState> {
+  const me = await requireOwner();
+  let email = "";
+  const result = await runAction(async () => {
+    ({ email } = await access.removeOwner(userId, me.id));
+  });
+  if (result?.error) return result;
+  // Their row (and this form) disappears, so show the confirmation on the page instead.
+  redirect(`/admin/owners?removed=${encodeURIComponent(email)}`);
 }
 
 // ── Skates ───────────────────────────────────────────────────

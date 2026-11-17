@@ -62,6 +62,7 @@ export function ActionForm({
           </div>
         )}
         {state?.link && <CopyLink url={state.link} />}
+        {state?.secret && <CopyValue label={state.secret.label} value={state.secret.value} mono />}
       </PendingContext.Provider>
     </form>
   );
@@ -90,22 +91,30 @@ export function SubmitButton({
 
 /** A read-only link with a Copy button (for one-time links). */
 export function CopyLink({ url }: { url: string }) {
+  return <CopyValue label="New link" value={url} />;
+}
+
+/** A read-only value with a Copy button, for things shown only once. */
+export function CopyValue({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="mt-2 flex gap-2">
       <input
         readOnly
-        value={url}
-        aria-label="New link"
+        value={value}
+        aria-label={label}
         onFocus={(e) => e.currentTarget.select()}
-        className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700"
+        className={cx(
+          "min-w-0 flex-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 font-mono text-slate-700",
+          mono ? "text-base tracking-wider" : "text-xs",
+        )}
       />
       <button
         type="button"
         className={buttonClass("secondary", "sm")}
         onClick={async () => {
           try {
-            await navigator.clipboard.writeText(url);
+            await navigator.clipboard.writeText(value);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
           } catch {
